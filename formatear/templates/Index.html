@@ -1,0 +1,16 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Subir archivo</title>
+</head>
+<body>
+    <h1>Sube tu archivo</h1>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Generar</button>
+    </form>
+    <script src="{% static 'funciones.js' %}"></script>
+</body>
+</html>
