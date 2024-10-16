@@ -13,22 +13,27 @@ def index(request):
         form = MainForm(request.POST, request.FILES)
         if form.is_valid():
             archivini = request.FILES['sel_archivo']
-            
             df = pd.read_excel(archivini)
-            rfc_col = []
+            full_date = datetime.now()
+            curr_date = full_date.date()
+            
             for idx, row in df.iterrows():
+                id_p = row['ID_PERSONA']
                 paterno = row['PATERNO']
                 materno = row['MATERNO']
                 nombre = row['NOMBRE']
-                sexo = row['SEXO']
                 
                 try:
                     f_nac = row['F_NAC']
-                    fecha_nacimiento = str(f_nac)[:10]
                     fecha_nac_formated = formatearRFC(str(f_nac))
                     paterno_filtred = paterno.strip()
-                    materno_filtred = materno.strip()
+                    paterno_filtred = format_apellido(paterno_filtred)
+                    materno_filtred = materno.strip() if pd.notna(materno) else 'X'
+                    materno_filtred = format_apellido(materno_filtred)
+                    
                     nombre_filtred = nombre.strip()
+                    nombre_filtred = format_nombre(nombre_filtred)
+                    
                     
                     homonimia_code = homonimia(paterno_filtred, materno_filtred, nombre_filtred)
                     iniciales =get_iniciales(paterno_filtred, materno_filtred, nombre_filtred)
@@ -38,20 +43,23 @@ def index(request):
                     
                     print(f"""
                             Información de la fila:
+                                - Id_Persona: {id_p}
                                 - Nombre completo: {nombre_filtred} {paterno_filtred} {materno_filtred}
                                 - Siglas nombre: {iniciales}
-                                - Fecha de nacimiento: {fecha_nacimiento}
                                 - Codigo de homonimia: {homonimia_code}
                                 - RFC final: {rfc}
                           """)
                     
-                    rfc_col.append(rfc)
-                    df['RFC_13'] = rfc_col
+                    query = f"( {id_p}, '{rfc}'),"
+                    
+                    df.at[idx, 'RFC_13'] = rfc
+                    df.at[idx, 'QUERY_SET'] = query
                 except Exception as e:
-                    print('Fin del archivo: {e}')
-            print(f'Todos RFC: {rfc_col}')
+                    print(f'Fin del archivo: {type(e)}')
+                    print(f'Error: {e}')
+            
             response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            response['Content-Disposition'] = 'attachment; filename=RFC_Generados.xlsx'
+            response['Content-Disposition'] = f'attachment; filename=RFC_Generados_{curr_date}.xlsx'
             df.to_excel(response, index=False)
             return response     
     else:
@@ -87,7 +95,7 @@ def filtrar_nombres_RFC(str_texto):
     """
 
     # Lista de palabras a eliminar (mejorada para incluir expresiones regulares)
-    palabras_a_eliminar = r"\b(?:de|del|la|los|las|y|mc|mac|von|van|j|jose|maria|mi|i|o|o'|e|ma)\b"
+    palabras_a_eliminar = r"\b(?:de|del|la|los|las|y|mc|mac|von|van|j|mi|i|o|o'|e|ma)\b"
 
     # Eliminar espacios en blanco adicionales
     str_texto = ' '.join(str_texto.split())
@@ -102,6 +110,28 @@ def filtrar_nombres_RFC(str_texto):
         
     return str_texto
 
+def format_nombre(nombre):
+    lista_excluir = ["DE", "DEL", "LA", "LAS", "LOS", "DE LA", "DE LAS", "DE LOS",
+                        "Y", "I", "I.", "MC", "MAC", "VON", "VAN", "'", ".", ",", "_", "-",
+                        "MA", "MA.", "MARIA","J", "J.", "JOSE"]
+    
+    lista_excepciones = ["JOSE MARIA", "JOSE JOSE", "MARIA JOSE","MARIA MARIA"] 
+    
+    nombre_list = nombre.split()
+    if len(nombre_list)>1:
+        if nombre in lista_excepciones: 
+            nombre_list = nombre.split()
+            return nombre_list[0]
+        
+        for elemento in nombre_list:
+            elemento = elemento.strip()
+            if elemento in lista_excluir:
+                continue
+            else:
+                nombre=elemento
+                break
+    return nombre
+
 def get_iniciales(paterno, materno, nombre):
     paterno = filtrar_nombres_RFC(paterno)
     materno = filtrar_nombres_RFC(materno)
@@ -111,8 +141,12 @@ def get_iniciales(paterno, materno, nombre):
     vocales = "AEIOUaeiou"
     primera_vocal_paterno = next((letra for letra in paterno[1:] if letra in vocales), '').upper()
     
-    primera_materno = materno[0].upper()
+    if not primera_vocal_paterno:
+        if len(paterno) >= 1:
+            primera_vocal_paterno = paterno[1].upper()
     
+    primera_materno = materno[0].upper()
+        
     nombre_list = nombre.strip().split()
     
     if nombre_list[0].lower() in ['jose', 'maria'] and len(nombre_list) >= 2:
@@ -121,11 +155,49 @@ def get_iniciales(paterno, materno, nombre):
     else:
         primera_nombre = nombre_list[0][0].upper()
     
-    codigo = primera_paterno + primera_vocal_paterno + primera_materno + primera_nombre
+    codigo = primera_paterno + primera_vocal_paterno + primera_materno + nombre[:1]
+    codigo = exorcisar_iniciales(codigo)
     
     return codigo
-    
 
+def exorcisar_iniciales(iniciales):
+    palabrotas_list = [
+        'BACA', 'BAKA', 'BUEY', 'BUEI', 'CACA', 'CACO', 'CAGO', 'CAKA', 'CAKO', 'COGE', 'COJE',
+        'COJI', 'COJO', 'COJA', 'COLA', 'CULO', 'FALO', 'FETO', 'GUEI', 'GUEY', 'GETA', 'JETA',
+        'JOTO', 'JOTA', 'KAKA', 'KACA', 'KACO', 'KAGA', 'KAGO', 'KOGE', 'KOJE', 'KOGI', 'KOJI',
+        'KOJO', 'KOLA', 'LILO', 'LELO', 'LERO', 'LIRO', 'LOCA', 'LOKA', 'LOCO', 'LOKO', 'MAME',
+        'MAMO', 'MEAR', 'MEAS', 'MEAR', 'MION', 'MOCO', 'MOKO', 'MULA', 'MULO', 'NACA', 'NACO',
+        'PEDO', 'PEDA', 'PENE', 'PIPI', 'PITO', 'POPO', 'PUTA', 'PUTO', 'PUTE', 'POTO', 'QULO',
+        'QAQA', 'QACA', 'QACO', 'QOLA', 'RATA', 'ROBA', 'ROBE', 'ROBO', 'RUIN', 'SENO', 'CENO',
+        'ZENO', 'TETA', 'TETO', 'VACA', 'VAGO', 'BAGO', 'VAGA', 'BAGA', 'VUEI', 'VUEY', 'WUEI',
+        'WUEY', 'PUSI', 'PUSY', 'MATA', 'MATO', 'MATE', 'PUZY', 'PUZI', 'VRGA', 'BRGA', 'VRGO',
+        'BRGO', 'TOTO', 'PEPA', 'PALO', 'VATO', 'BATO', 'VALE', 'CRDO', 'MALO', 'MALA', 'CELO',
+        'SELO', 'ZELO', 'LAME', 'LAMO', 'LAMI', 'PUCI', 'PUCY', 'DICK', 'CHON', 'SEXO', 'OJON',
+        'BOBO', 'BOBA', 'BDSM', 'VOVO', 'VOVA', 'MOTA', 'QLEI', 'QLEY', 'NULO', 'NULA', 'MONO',
+        'MONA', 'TULA', 'PETE', 'CEBO', 'SEBO', 'ZEBO'
+    ]
+    if iniciales in palabrotas_list:
+        iniciales = iniciales[:3] + 'X'
+    
+    return iniciales
+    
+def format_apellido(apellido):
+    
+        lista_excluir = ["DE", "DEL", "LA", "LAS", "LOS", "DE LA", "DE LAS", "DE LOS",
+                         "Y", "I", "I.", "MC", "MAC", "VON", "VAN", "'", ".", ",", "_", "-"]
+        
+        apellido_list = apellido.split()
+        if len(apellido_list)>1:
+            for elemento in apellido_list:
+                elemento = elemento.strip()
+                if elemento in lista_excluir:
+                    continue
+                else:
+                    apellido=elemento
+                    break
+                
+        return apellido
+    
 def homonimia(ap_paterno, ap_materno, nombre):
     nombre_completo = f"{ap_paterno.strip()} {ap_materno.strip()} {nombre.strip()}"
     numero = '0'
